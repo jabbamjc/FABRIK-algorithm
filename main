@@ -1,0 +1,192 @@
+$gtk.reset
+class Vec2
+    attr_accessor :x, :y
+    def initialize x, y
+        @x = x
+        @y = y
+    end
+
+    def + operand
+        Vec2.new(@x+operand.x, @y+operand.y)
+    end
+
+    def - operand
+        Vec2.new(@x-operand.x, @y-operand.y)
+    end
+
+    def * scalar
+        Vec2.new(@x*scalar, @y*scalar)
+    end
+
+    def / scalar
+        Vec2.new(@x/scalar, @y/scalar)
+    end
+
+    def dot vec2
+        return (@x*vec2.x + @y*vec2.y)
+    end
+
+    def cross vec2
+        return (@x*vec2.y - @y*vec2.x)
+    end
+
+    def mag
+        Math.sqrt(@x**2 + @y**2)
+    end
+
+    def normal
+        return Vec2.new(0,0) if @x == 0 && @y == 0
+        self / mag
+    end
+
+    def rotate_degrees theta, vec2 = Vec2.new(0,0)
+        theta *= (Math::PI/180)
+        Vec2.new(
+            ((@x - vec2.x) * Math.cos(theta)) - ((@y - vec2.y) * Math.sin(theta)) + vec2.x,
+            ((@x - vec2.x) * Math.sin(theta)) + ((@y - vec2.y) * Math.cos(theta)) + vec2.y
+        )
+    end
+
+    def rotate_degrees! theta, vec2 = Vec2.new(0,0)
+        theta *= (Math::PI/180)
+        @x = ((@x - vec2.x) * Math.cos(theta)) - ((@y - vec2.y) * Math.sin(theta)) + vec2.x
+        @y = ((@x - vec2.x) * Math.sin(theta)) + ((@y - vec2.y) * Math.cos(theta)) + vec2.y
+    end
+
+    def rotate_radians theta, vec2 = Vec2.new(0,0)
+        Vec2.new(
+            ((@x - vec2.x) * Math.cos(theta)) - ((@y - vec2.y) * Math.sin(theta)) + vec2.x,
+            ((@x - vec2.x) * Math.sin(theta)) + ((@y - vec2.y) * Math.cos(theta)) + vec2.y
+        )
+    end
+
+    def rotate_radians! theta, vec2 = Vec2.new(0,0)
+        @x = ((@x - vec2.x) * Math.cos(theta)) - ((@y - vec2.y) * Math.sin(theta)) + vec2.x
+        @y = ((@x - vec2.x) * Math.sin(theta)) + ((@y - vec2.y) * Math.cos(theta)) + vec2.y
+    end
+
+    def to_s
+        "x:#{@x.round(1)} ,y:#{@y.round(1)}"
+    end
+end
+
+class Point
+    attr_accessor :position, :previous_position, :locked, :dy
+    def initialize position, locked = false
+        @position = position
+        @previous_position = position
+        @locked = false
+
+        @dy = Vec2.new(0,0)
+    end
+
+end
+
+class Stick
+    attr_accessor :point_a, :point_b, :length
+    def initialize point_a, point_b
+        @point_a = point_a
+        @point_b = point_b
+        @length = Math.sqrt((point_b.position.x-point_a.position.x)**2 + (point_b.position.y-point_a.position.y)**2)
+    end
+end
+
+class Simulate
+    attr_gtk
+    def initialize args
+        @points = []
+        @sticks = []
+        @g = Vec2.new(0,-1)*0.01
+        @numerations = 20
+
+        @draw_mode = true
+
+        @drawing_stick = false
+        @stick_start
+        @stick_end
+    end
+
+    def draw
+        @points.each do |p|
+            p.locked ? b = 255 : r = 255
+            args.outputs.solids << {x:p.position.x-4, y:p.position.y-4, w:8, h:8, r:r, b:b}
+        end
+
+        @sticks.each do |stick|
+            args.outputs.lines << {x:stick.point_a.position.x, y:stick.point_a.position.y, x2:stick.point_b.position.x, y2:stick.point_b.position.y, g:255}
+        end
+    end
+
+    def tick
+        if @draw_mode
+            if args.inputs.mouse.click && args.inputs.mouse.button_left
+                @points.each do |p|
+                    if args.inputs.mouse.point.intersect_rect? ({x:p.position.x-4, y:p.position.y-4, w:8, h:8})
+                        p.locked = !p.locked
+                        return
+                    end
+                end
+                @points << Point.new(Vec2.new(args.inputs.mouse.x, args.inputs.mouse.y))
+            end
+
+            if args.inputs.mouse.click && args.inputs.mouse.button_right
+                @points.each do |p|
+                    if args.inputs.mouse.point.intersect_rect? ({x:p.position.x-4, y:p.position.y-4, w:8, h:8})
+                        @stick_start = p
+                        @drawing_stick = true
+                    end
+                end
+            end
+
+            if @drawing_stick
+                if args.inputs.mouse.up
+                    @points.each do |p|
+                        if args.inputs.mouse.point.intersect_rect? ({x:p.position.x-4, y:p.position.y-4, w:8, h:8})
+                            @stick_end = p
+                        end
+                    end
+                    @drawing_stick = false
+                    @sticks << Stick.new(@stick_start, @stick_end)
+                end
+            end
+            
+        else
+            @points.each do |p|
+                if !p.locked
+                    position_before_update = p.position
+                    p.position += p.position - p.previous_position
+                    p.dy += @g
+                    p.position += p.dy
+                    p.previous_position = position_before_update
+                end
+            end
+
+            @numerations.times do 
+                @sticks.each do |stick|
+                    stick_centre = (stick.point_a.position + stick.point_b.position)/2
+                    stick_direction = (stick.point_a.position - stick.point_b.position).normal
+                    stick.point_a.position = stick_centre + stick_direction * stick.length / 2 if !stick.point_a.locked
+                    stick.point_b.position = stick_centre - stick_direction * stick.length / 2 if !stick.point_b.locked
+                end
+            end
+        end
+        draw
+        @draw_mode = !@draw_mode if args.inputs.keyboard.key_down.q
+    end
+end
+
+def tick args
+    if args.inputs.keyboard.key_down.escape 
+        $game = Simulate.new args
+    end
+  
+    $game ||= Simulate.new args
+    $game.args = args
+    $game.tick
+
+    args.outputs.labels << [1270, 710, args.gtk.current_framerate.round(1), 0, 2, 255, 0, 0]
+
+    args.outputs.labels << [10, 710, "Left-click to place a point", 0, 0, 255, 0, 0]
+    args.outputs.labels << [10, 690, "Left-click on a point to lock it", 0, 0, 255, 0, 0]
+    args.outputs.labels << [10, 670, "Right-click and drag between points to make a connection", 0, 0, 255, 0, 0]
+end
